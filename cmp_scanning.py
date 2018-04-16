@@ -66,9 +66,11 @@ def read_configuration(conf_parser: ConfigParser) -> Configuration:
     show_fsky = conf_sect.getboolean('show_fsky', True)
     figure_width = conf_sect.getfloat('figure_width')
     figure_height = conf_sect.getfloat('figure_height')
-    figure_file_name_mask = conf_sect.get('figure_file_name_mask', 'anim%04d.png')
+    figure_file_name_mask = conf_sect.get(
+        'figure_file_name_mask', 'anim%04d.png')
     time_measure_unit = conf_sect.get('time_measure_unit', '')
-    data_source_names = [x.strip() for x in conf_sect.get('data_sources').split(',')]
+    data_source_names = [x.strip()
+                         for x in conf_sect.get('data_sources').split(',')]
 
     data_sources = []  # type: List[DataSource]
     for cur_name in data_source_names:
@@ -113,7 +115,8 @@ def read_pointings(data_source: DataSource, file_name: str, nside: int):
     log.info('reading file "{0}"'.format(file_name))
     with fits.open(file_name) as f:
         hdu = f[data_source.table_hdu]
-        time = hdu.data.field(data_source.time_column) * data_source.time_factor
+        time = hdu.data.field(data_source.time_column) * \
+            data_source.time_factor
         theta, phi = [hdu.data.field(x) * data_source.angle_factor
                       for x in (data_source.theta_column, data_source.phi_column)]
 
@@ -134,7 +137,8 @@ class TodCollection:
 
     def get_pixidx(self, start_time: float, end_time: float):
         if (self.pointings is None) or (self.pointings.time[-1] < end_time):
-            new = read_pointings(self.data_source, self.file_names[self.cur_idx], self.nside)
+            new = read_pointings(
+                self.data_source, self.file_names[self.cur_idx], self.nside)
 
             if self.first_time is None:
                 self.first_time = new.time[0]
@@ -142,14 +146,17 @@ class TodCollection:
 
             if self.pointings is not None:
                 mask = self.pointings.time >= start_time
-                self.pointings.time = np.concatenate((self.pointings.time[mask], new.time))
-                self.pointings.pixidx = np.concatenate((self.pointings.pixidx[mask], new.pixidx))
+                self.pointings.time = np.concatenate(
+                    (self.pointings.time[mask], new.time))
+                self.pointings.pixidx = np.concatenate(
+                    (self.pointings.pixidx[mask], new.pixidx))
             else:
                 self.pointings = new
 
             self.cur_idx += 1
 
-        mask = (self.pointings.time >= start_time) & (self.pointings.time < end_time)
+        mask = (self.pointings.time >= start_time) & (
+            self.pointings.time < end_time)
         return self.pointings.pixidx[mask]
 
 
@@ -159,10 +166,14 @@ def fsky(pixels):
     ones = len(pixels[pixels > 0])
     return (100.0 * ones) / len(pixels)
 
+
 @click.command()
+@click.option('--save-fsky', type=str, default=None,
+              help='Save the values of f_sky for each frame in a text file')
 @click.argument('parameter_file')
-def main(parameter_file):
-    log.basicConfig(level=log.INFO, format='[%(asctime)s %(levelname)s] %(message)s')
+def main(save_fsky, parameter_file):
+    log.basicConfig(
+        level=log.INFO, format='[%(asctime)s %(levelname)s] %(message)s')
 
     conf_parser = ConfigParser(interpolation=ExtendedInterpolation())
     with open(parameter_file, 'rt') as f:
@@ -172,14 +183,25 @@ def main(parameter_file):
     plt.figure(figsize=(config.figure_width, config.figure_height))
     start_time = 0
 
-    collections = [TodCollection(data_source=x, nside=config.nside) for x in config.data_sources]
+    collections = [TodCollection(data_source=x, nside=config.nside)
+                   for x in config.data_sources]
+    if save_fsky:
+        fsky_file = open(save_fsky, 'wt')
+    else:
+        fsky_file = None
+
     for cur_frame in range(config.number_of_frames):
         plt.clf()
 
+        if fsky_file:
+            fsky_line = '{0:6d}'.format(cur_frame)
+
         for coll in collections:
-            pixidx = coll.get_pixidx(start_time, start_time + config.delta_time)
+            pixidx = coll.get_pixidx(
+                start_time, start_time + config.delta_time)
             coll.map_pixels[pixidx] = 2
 
+            cur_fsky = fsky(coll.map_pixels)
             if config.show_fsky:
                 title_template = '{name} ({time:.1f}, fsky={fsky:.2f})'
             else:
@@ -187,8 +209,16 @@ def main(parameter_file):
             map_title = title_template.format(name=coll.data_source.name,
                                               time=start_time + config.delta_time * 0.5,
                                               unit=config.time_measure_unit,
-                                              fsky=fsky(coll.map_pixels))
-            healpy.mollview(coll.map_pixels, title=map_title, sub=coll.data_source.subplot, cbar=False)
+                                              fsky=cur_fsky)
+            healpy.mollview(coll.map_pixels, title=map_title,
+                            sub=coll.data_source.subplot, cbar=False)
+
+            if fsky_file:
+                fsky_line += '\t{0:.3f}'.format(cur_fsky)
+
+        if fsky_file:
+            fsky_file.write(fsky_line)
+            fsky_file.write('\n')
 
         file_name = config.figure_file_name_mask % cur_frame
         plt.savefig(file_name)
@@ -198,6 +228,10 @@ def main(parameter_file):
             coll.map_pixels[coll.map_pixels > 0] = 1
 
         start_time += config.delta_time
+
+    if fsky_file:
+        fsky_file.close()
+
 
 if __name__ == '__main__':
     main()
