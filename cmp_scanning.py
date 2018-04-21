@@ -18,6 +18,7 @@ import healpy
 import numpy as np
 
 from astropy.io import fits
+from dipole import get_dipole_temperature
 
 DataSource = namedtuple('DataSource',
                         ['name',
@@ -168,10 +169,15 @@ def fsky(pixels):
 
 
 @click.command()
+@click.option('--coord', type=str, default='E',
+	      help='Coordinate system used for pointings ("C": celestial, '
+	      '"E": equatorial, "G": galactic). The default is "E".')
 @click.option('--save-fsky', type=str, default=None,
               help='Save the values of f_sky for each frame in a text file')
+@click.option('--save-dipole', type=str, default=None,
+              help='Save a few parameters about the dipole signal in a text file')
 @click.argument('parameter_file')
-def main(save_fsky, parameter_file):
+def main(coord, save_fsky, save_dipole, parameter_file):
     log.basicConfig(
         level=log.INFO, format='[%(asctime)s %(levelname)s] %(message)s')
 
@@ -190,11 +196,21 @@ def main(save_fsky, parameter_file):
     else:
         fsky_file = None
 
+    if save_dipole:
+        dipole_file = open(save_dipole, 'wt')
+    else:
+        dipole_file = None
+
+    rotmatr = healpy.rotator.Rotator(coord=[coord, 'E']).mat
+
     for cur_frame in range(config.number_of_frames):
         plt.clf()
 
+        header_line = '{0:6d}\t{1}'.format(cur_frame, start_time)
         if fsky_file:
-            fsky_line = '{0:6d}'.format(cur_frame)
+            fsky_line = header_line
+        if dipole_file:
+            dipole_line = header_line
 
         for coll in collections:
             pixidx = coll.get_pixidx(
@@ -216,9 +232,19 @@ def main(save_fsky, parameter_file):
             if fsky_file:
                 fsky_line += '\t{0:.3f}'.format(cur_fsky)
 
+            if dipole_file:
+                dip_signal = get_dipole_temperature(
+                    np.dot(rotmatr, healpy.pix2vec(config.nside, pixidx)))
+                dipole_line += '\t{0:.9e}\t{1:.9e}'.format(
+                    np.min(dip_signal), np.max(dip_signal))
+
         if fsky_file:
             fsky_file.write(fsky_line)
             fsky_file.write('\n')
+
+        if dipole_file:
+            dipole_file.write(dipole_line)
+            dipole_file.write('\n')
 
         file_name = config.figure_file_name_mask % cur_frame
         plt.savefig(file_name)
@@ -231,6 +257,9 @@ def main(save_fsky, parameter_file):
 
     if fsky_file:
         fsky_file.close()
+
+    if dipole_file:
+        dipole_file.close()
 
 
 if __name__ == '__main__':
